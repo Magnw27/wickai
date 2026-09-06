@@ -11,19 +11,17 @@ const defaultModel = process.env.WICKAI_MODEL ?? "wick-fast";
 const requestSchema = z.object({
   messages: z.array(z.unknown()).min(1),
   model: z.string().trim().min(1).optional(),
+  memory: z.string().max(4000).optional(),
+  user: z.string().trim().min(1).max(80).optional(),
 });
 
 const configuredModels = process.env.WICKAI_MODELS
   ?.split(",")
   .map((entry) => entry.split("|")[0]?.trim())
   .filter(Boolean) ?? [];
-
 const allowedModels = new Set(configuredModels.length ? configuredModels : [defaultModel]);
 
-const provider = createOpenAI({
-  baseURL,
-  ...(apiKey ? { apiKey } : {}),
-});
+const provider = createOpenAI({ baseURL, ...(apiKey ? { apiKey } : {}) });
 
 const SYSTEM_PROMPT = [
   "Anda adalah AI assistant yang sangat cerdas dan cepat bernama WickAI yang dikembangkan oleh developer muda Muhammad Arif Wicaksono yang berusia 14 tahun dan membangun WickAI di LAB-nya.",
@@ -36,9 +34,7 @@ const SYSTEM_PROMPT = [
 ].join("\n");
 
 export async function POST(req: Request) {
-  if (!apiKey) {
-    return Response.json({ error: "WickAI API key is not configured." }, { status: 500 });
-  }
+  if (!apiKey) return Response.json({ error: "WickAI API key is not configured." }, { status: 500 });
 
   try {
     const payload = requestSchema.parse(await req.json());
@@ -49,9 +45,14 @@ export async function POST(req: Request) {
       return Response.json({ error: "Selected model is not enabled for WickAI." }, { status: 400 });
     }
 
+    const context = [
+      payload.user ? `Current user: ${payload.user}` : "",
+      payload.memory?.trim() ? `User memory:\n${payload.memory.trim()}` : "",
+    ].filter(Boolean).join("\n\n");
+
     const result = streamText({
       model: provider.chat(selectedModel),
-      system: SYSTEM_PROMPT,
+      system: context ? `${SYSTEM_PROMPT}\n\n${context}` : SYSTEM_PROMPT,
       messages: await convertToModelMessages(messages),
       temperature: 0.4,
     });
