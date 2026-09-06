@@ -1,9 +1,18 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "WickAI",
-  description: "A modern, provider-agnostic AI workspace.",
+  title: "WickAI — AI Workspace",
+  description: "A focused, open-source AI workspace built with Next.js and the Vercel AI SDK.",
+  applicationName: "WickAI",
+  robots: { index: true, follow: true },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#07070a",
+  colorScheme: "dark",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
