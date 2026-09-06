@@ -84,6 +84,36 @@ button:disabled { cursor: not-allowed; }
 
 .wick-rise { animation: wick-rise .55s cubic-bezier(.22, 1, .36, 1) both; }
 .wick-pop { animation: wick-pop .35s cubic-bezier(.22, 1, .36, 1) both; }
+
+/* Shimmer loader inspired by the supplied Loading UI component. */
+.wick-pop.wick-thinking {
+  gap: .65rem;
+  color: rgba(161,161,170,.42);
+}
+
+.wick-thinking > .wick-shimmer-text {
+  display: inline-block;
+  background-image: linear-gradient(90deg, rgba(161,161,170,.28) 0%, rgba(244,244,245,.98) 50%, rgba(161,161,170,.28) 100%);
+  background-size: 250% 100%;
+  background-position: 100% center;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-repeat: no-repeat;
+  animation: wick-text-shimmer 2.1s linear infinite;
+}
+
+.wick-thinking::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgba(167,139,250,.9);
+  box-shadow: 0 0 14px rgba(167,139,250,.55);
+  animation: wick-pulse 1.6s ease-in-out infinite;
+}
+
 .wick-cursor::after {
   content: "";
   display: inline-block;
@@ -110,6 +140,14 @@ button:disabled { cursor: not-allowed; }
   to { opacity: 1; transform: scale(1); }
 }
 @keyframes wick-blink { 50% { opacity: 0; } }
+@keyframes wick-text-shimmer {
+  from { background-position: 100% center; }
+  to { background-position: 0% center; }
+}
+@keyframes wick-pulse {
+  0%, 100% { opacity: .45; transform: scale(.86); }
+  50% { opacity: 1; transform: scale(1); }
+}
 
 @media (max-width: 640px) {
   .wick-shell::before,
