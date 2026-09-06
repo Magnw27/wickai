@@ -7,10 +7,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 type StoredChat = { id: string; title: string; updatedAt: number; messages: UIMessage[] };
 
+type WickModel = { id: string; label: string };
+
 const STORAGE_KEY = "wickai:chats:v1";
-const fallbackModels = [
-  { id: "openai/gpt-4o-mini", label: "WickAI Fast" },
-  { id: "openai/gpt-4o", label: "WickAI Pro" },
+const fallbackModels: WickModel[] = [
+  { id: "wick-fast", label: "Wick Fast" },
+  { id: "wick-1.5", label: "Wick 1.5" },
+  { id: "wick-ultra2.3", label: "Wick Ultra 2.3" },
+  { id: "wick-chat", label: "Wick Chat" },
 ];
 const starterPrompts = [
   "Explain a complex topic simply",
@@ -27,7 +31,7 @@ export function WickAIChat() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [input, setInput] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
-  const [model, setModel] = useState(fallbackModels[1].id);
+  const [model, setModel] = useState(fallbackModels[2].id);
   const [models, setModels] = useState(fallbackModels);
   const [chatId, setChatId] = useState(() => `chat_${Date.now()}`);
   const [history, setHistory] = useState<StoredChat[]>([]);
@@ -52,7 +56,7 @@ export function WickAIChat() {
   useEffect(() => {
     fetch("/api/models")
       .then((response) => (response.ok ? response.json() : Promise.reject()))
-      .then((data: { models?: { id: string; label: string }[] }) => {
+      .then((data: { models?: WickModel[] }) => {
         if (!data.models?.length) return;
         setModels(data.models);
         setModel((current) => data.models?.some((item) => item.id === current) ? current : data.models![0].id);
@@ -92,129 +96,137 @@ export function WickAIChat() {
   };
 
   const deleteChat = (id: string) => {
-    const next = history.filter((chat) => chat.id !== id);
-    setHistory(next);
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
+    setHistory((current) => {
+      const next = current.filter((item) => item.id !== id);
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
     if (id === chatId) startNewChat();
   };
 
-  const submit = (event: React.FormEvent) => {
-    event.preventDefault();
-    const text = input.trim();
-    if (!text || busy) return;
-    sendMessage({ text }, { body: { model } });
+  const submitMessage = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || busy) return;
     setInput("");
+    await sendMessage({ text: trimmed }, { body: { model } });
   };
 
-  const copyMessage = async (id: string, text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(id);
-      window.setTimeout(() => setCopied(null), 1300);
-    } catch {}
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    void submitMessage(input);
   };
 
   return (
-    <main className="wick-shell flex min-h-dvh text-zinc-100">
-      <div className="wick-noise" aria-hidden="true" />
+    <div className="relative flex min-h-dvh overflow-hidden text-zinc-100">
+      <aside className={`${sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"} fixed inset-y-0 left-0 z-40 flex w-[280px] flex-col border-r border-white/8 bg-black/35 p-3 backdrop-blur-2xl transition-transform duration-300 md:static md:shrink-0`}>
+        <div className="flex items-center justify-between px-2 py-2">
+          <button type="button" onClick={startNewChat} className="wick-button flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium">
+            <Plus className="size-4" /> New chat
+          </button>
+          <button type="button" onClick={() => setSidebarOpen(false)} className="rounded-lg p-2 text-zinc-400 hover:bg-white/6 hover:text-white md:hidden" aria-label="Close sidebar">
+            <Menu className="size-5" />
+          </button>
+        </div>
 
-      <aside className={`glass fixed inset-y-0 left-0 z-40 w-[292px] p-3.5 transition-transform duration-300 lg:static lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
-        <div className="flex h-full flex-col">
-          <div className="mb-4 flex items-center justify-between px-2 py-1">
-            <div className="flex items-center gap-2.5">
-              <div className="grid size-9 place-items-center rounded-xl bg-white/[.075] ring-1 ring-white/10"><Sparkles size={16} /></div>
-              <div><div className="font-semibold tracking-tight">WickAI</div><div className="text-[11px] text-zinc-500">AI workspace</div></div>
-            </div>
-            <span className="rounded-full border border-emerald-300/15 bg-emerald-300/5 px-2 py-1 text-[10px] font-medium text-emerald-300/80">ONLINE</span>
-          </div>
-
-          <button onClick={startNewChat} className="mb-3 flex items-center gap-2 rounded-xl bg-white px-3.5 py-3 text-sm font-semibold text-black shadow-lg transition hover:-translate-y-0.5 hover:bg-zinc-100"><Plus size={16} /> New chat</button>
-          <div className="mb-2 flex items-center gap-2 px-2 text-[11px] font-semibold uppercase tracking-[.18em] text-zinc-600"><Search size={12} /> Recent chats</div>
-          <div className="wick-scrollbar flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-1">
-            {history.length === 0 ? <div className="rounded-xl border border-dashed border-white/[.07] p-4 text-xs leading-5 text-zinc-600">Your recent conversations will appear here.</div> : history.map((chat) => (
-              <div key={chat.id} className="group flex items-center gap-1">
-                <button onClick={() => openChat(chat)} className={`min-w-0 flex-1 rounded-xl px-3 py-2.5 text-left text-sm transition hover:bg-white/[.05] ${chat.id === chatId ? "bg-white/[.055] text-zinc-200" : "text-zinc-500"}`}>
-                  <span className="block truncate">{chat.title}</span><span className="mt-0.5 block text-[10px] text-zinc-700">{new Date(chat.updatedAt).toLocaleDateString()}</span>
+        <div className="mt-3 flex-1 overflow-y-auto wick-scrollbar">
+          <div className="px-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Recent</div>
+          <div className="space-y-1">
+            {history.length ? history.map((chat) => (
+              <div key={chat.id} className={`group flex items-center gap-2 rounded-xl px-3 py-2 ${chat.id === chatId ? "bg-white/8" : "hover:bg-white/5"}`}>
+                <button type="button" onClick={() => openChat(chat)} className="min-w-0 flex-1 text-left">
+                  <div className="truncate text-sm text-zinc-200">{chat.title}</div>
                 </button>
-                <button title="Delete conversation" onClick={() => deleteChat(chat.id)} className="mr-1 grid size-8 shrink-0 place-items-center rounded-lg text-zinc-700 opacity-0 transition hover:bg-red-400/10 hover:text-red-300 group-hover:opacity-100" aria-label={`Delete ${chat.title}`}><Trash2 size={14} /></button>
+                <button type="button" onClick={() => deleteChat(chat.id)} className="rounded-lg p-1.5 text-zinc-500 opacity-0 transition group-hover:opacity-100 hover:bg-white/8 hover:text-zinc-200" aria-label="Delete chat">
+                  <Trash2 className="size-4" />
+                </button>
               </div>
-            ))}
+            )) : <div className="px-3 py-5 text-sm text-zinc-600">No conversations yet.</div>}
           </div>
-          <div className="mt-3 rounded-xl border border-white/[.06] bg-black/10 p-3 text-xs text-zinc-600"><div className="font-medium text-zinc-500">Provider</div><div className="mt-1 truncate">OpenAI-compatible endpoint</div></div>
         </div>
       </aside>
 
-      {sidebarOpen && <button aria-label="Close sidebar" onClick={() => setSidebarOpen(false)} className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm lg:hidden" />}
+      {sidebarOpen && <button type="button" aria-label="Close sidebar" onClick={() => setSidebarOpen(false)} className="fixed inset-0 z-30 bg-black/45 backdrop-blur-sm md:hidden" />}
 
-      <section className="relative flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex h-[62px] items-center justify-between border-b border-white/[.055] bg-black/15 px-3 backdrop-blur-2xl sm:px-5 lg:px-7">
-          <button onClick={() => setSidebarOpen(true)} className="grid size-10 place-items-center rounded-xl text-zinc-400 transition hover:bg-white/[.06] hover:text-white lg:hidden" aria-label="Open sidebar"><Menu size={18} /></button>
-          <div className="ml-auto flex items-center gap-2">
-            <div className="hidden rounded-xl border border-white/[.06] bg-white/[.025] px-3 py-2 text-[11px] text-zinc-600 sm:block">OpenAI-compatible</div>
-            <label className="flex items-center gap-2 rounded-xl border border-white/[.07] bg-white/[.035] px-2.5 py-2 text-xs text-zinc-300">
-              <span className="size-1.5 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(74,222,128,.75)]" />
-              <select value={model} onChange={(event) => setModel(event.target.value)} className="max-w-[145px] bg-transparent outline-none" aria-label="Select model">
+      <main className="relative flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-20 flex items-center justify-between border-b border-white/7 bg-black/16 px-3 py-3 backdrop-blur-xl md:px-5">
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => setSidebarOpen(true)} className="rounded-xl p-2 text-zinc-400 hover:bg-white/7 hover:text-white md:hidden" aria-label="Open sidebar">
+              <Menu className="size-5" />
+            </button>
+            <div className="flex items-center gap-2">
+              <div className="grid size-8 place-items-center rounded-xl border border-violet-300/15 bg-violet-400/10 text-violet-200"><Sparkles className="size-4" /></div>
+              <div>
+                <div className="text-sm font-semibold tracking-tight">WickAI</div>
+                <div className="text-[11px] text-zinc-500">AI Workspace</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="relative hidden sm:block">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-zinc-500" />
+              <select value={model} onChange={(event) => setModel(event.target.value)} className="appearance-none rounded-xl border border-white/8 bg-white/4 py-2 pl-8 pr-8 text-xs text-zinc-200 outline-none transition hover:bg-white/7 focus:border-violet-300/25">
                 {models.map((item) => <option key={item.id} value={item.id} className="bg-zinc-950">{item.label}</option>)}
               </select>
-            </label>
+            </div>
+            <button type="button" onClick={startNewChat} className="wick-button rounded-xl p-2 text-zinc-300" aria-label="New chat"><Plus className="size-5" /></button>
           </div>
         </header>
 
-        <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-3 pb-5 pt-7 sm:px-6 lg:px-8">
-          <div className="wick-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
+        <section className="wick-scrollbar flex-1 overflow-y-auto px-3 pb-40 pt-6 md:px-8 md:pt-8">
+          <div className="mx-auto w-full max-w-4xl">
             {messages.length === 0 ? (
-              <div className="wick-rise flex min-h-[calc(100dvh-190px)] flex-col items-center justify-center px-2 pb-20 text-center">
-                <div className="mb-5 grid size-[72px] place-items-center rounded-[22px] border border-white/[.08] bg-white/[.035] shadow-[0_18px_70px_rgba(0,0,0,.4)]"><Bot size={30} strokeWidth={1.8} /></div>
-                <p className="text-sm text-zinc-500">Your focused AI workspace</p>
-                <h1 className="mt-2 text-4xl font-semibold tracking-[-.055em] sm:text-5xl">Ask WickAI.</h1>
-                <p className="mt-4 max-w-xl text-sm leading-6 text-zinc-500">Build, research, plan, debug, and think with a fast OpenAI-compatible AI interface.</p>
-                <div className="mt-9 grid w-full max-w-2xl gap-2 sm:grid-cols-2">
-                  {starterPrompts.map((prompt, index) => <button key={prompt} onClick={() => setInput(prompt)} className="wick-rise rounded-2xl border border-white/[.07] bg-white/[.025] p-4 text-left text-sm text-zinc-400 transition duration-300 hover:-translate-y-1 hover:border-white/[.13] hover:bg-white/[.05] hover:text-zinc-200" style={{ animationDelay: `${index * 60}ms` }}>{prompt}</button>)}
+              <div className="flex min-h-[62vh] flex-col items-center justify-center py-10 text-center">
+                <div className="wick-rise grid size-16 place-items-center rounded-2xl border border-violet-300/10 bg-violet-400/8 shadow-2xl shadow-violet-950/20"><Bot className="size-7 text-violet-200" /></div>
+                <h1 className="wick-rise mt-6 text-3xl font-semibold tracking-tight sm:text-4xl">How can I help you today?</h1>
+                <p className="wick-rise mt-3 max-w-lg text-sm leading-6 text-zinc-500">Ask anything, build something, or drop a problem here. WickAI will keep the conversation focused.</p>
+                <div className="mt-8 grid w-full max-w-3xl gap-3 sm:grid-cols-2">
+                  {starterPrompts.map((prompt) => (
+                    <button key={prompt} type="button" onClick={() => void submitMessage(prompt)} className="wick-rise rounded-2xl border border-white/7 bg-white/3 p-4 text-left text-sm text-zinc-300 transition hover:-translate-y-0.5 hover:border-violet-300/15 hover:bg-white/5">{prompt}</button>
+                  ))}
                 </div>
               </div>
             ) : (
-              <div className="space-y-8 py-3 sm:py-5">
-                {messages.map((message, messageIndex) => {
+              <div className="space-y-7 pb-6">
+                {messages.map((message) => {
                   const text = messageText(message);
-                  const isLast = messageIndex === messages.length - 1;
+                  const isUser = message.role === "user";
                   return (
-                    <article key={message.id} className="wick-rise group">
-                      <div className={`flex gap-3 ${message.role === "user" ? "justify-end" : "justify-start"}`}>
-                        {message.role !== "user" && <div className="mt-1 grid size-8 shrink-0 place-items-center rounded-xl border border-white/[.07] bg-white/[.035] text-zinc-300"><Bot size={15} /></div>}
-                        <div className="min-w-0 max-w-[92%] sm:max-w-[82%]">
-                          <div className={`rounded-[22px] px-4 py-3.5 text-[15px] leading-7 ${message.role === "user" ? "bg-white text-zinc-950 shadow-lg shadow-black/10" : "border border-white/[.055] bg-white/[.025] text-zinc-200"}`}>
-                            {message.parts.map((part, index) => part.type === "text" ? <div key={`${message.id}-${index}`} className="whitespace-pre-wrap break-words">{part.text}</div> : null)}
-                            {isLast && message.role === "assistant" && status === "streaming" && <span className="wick-cursor" />}
-                          </div>
-                          {message.role === "assistant" && text && <div className="mt-1 flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
-                            <button title="Copy" onClick={() => copyMessage(message.id, text)} className="grid size-8 place-items-center rounded-lg text-zinc-600 transition hover:bg-white/[.05] hover:text-zinc-300" aria-label="Copy response">{copied === message.id ? <Check size={14} /> : <Copy size={14} />}</button>
-                            {isLast && !busy && <button title="Regenerate" onClick={() => regenerate()} className="rounded-lg px-2.5 py-1.5 text-[11px] text-zinc-600 transition hover:bg-white/[.05] hover:text-zinc-300">Regenerate</button>}
-                          </div>}
-                        </div>
-                        {message.role === "user" && <div className="mt-1 hidden size-8 shrink-0 place-items-center rounded-xl border border-white/[.07] bg-white/[.035] text-zinc-500 sm:grid"><UserRound size={15} /></div>}
+                    <article key={message.id} className={`wick-rise group flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
+                      {!isUser && <div className="mt-1 grid size-8 shrink-0 place-items-center rounded-xl border border-violet-300/10 bg-violet-400/8"><Bot className="size-4 text-violet-200" /></div>}
+                      <div className={`${isUser ? "max-w-[82%] rounded-2xl rounded-br-md bg-violet-400/12 px-4 py-3" : "max-w-[86%]"}`}>
+                        <div className="whitespace-pre-wrap text-[14px] leading-7 text-zinc-200">{text}</div>
+                        {!isUser && text && <div className="mt-3 flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                          <button type="button" onClick={async () => { await navigator.clipboard.writeText(text); setCopied(message.id); setTimeout(() => setCopied(null), 1200); }} className="rounded-lg p-1.5 text-zinc-500 hover:bg-white/7 hover:text-zinc-200" aria-label="Copy response">
+                            {copied === message.id ? <Check className="size-4" /> : <Copy className="size-4" />}
+                          </button>
+                          <button type="button" onClick={() => void regenerate()} className="rounded-lg px-2 py-1.5 text-xs text-zinc-500 hover:bg-white/7 hover:text-zinc-200">Regenerate</button>
+                        </div>}
                       </div>
+                      {isUser && <div className="mt-1 grid size-8 shrink-0 place-items-center rounded-xl border border-white/8 bg-white/6"><UserRound className="size-4 text-zinc-300" /></div>}
                     </article>
                   );
                 })}
-                {status === "submitted" && <div className="wick-pop flex items-center gap-3 pl-11 text-sm text-zinc-600"><span className="flex gap-1"><i className="size-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:-.2s]" /><i className="size-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:-.1s]" /><i className="size-1.5 animate-bounce rounded-full bg-zinc-500" /></span>WickAI is thinking…</div>}
-                {error && <div className="mx-auto flex max-w-xl items-center justify-between gap-3 rounded-2xl border border-red-300/10 bg-red-400/[.045] p-3.5 text-sm text-red-200/75"><span>Something went wrong while contacting the AI provider.</span><button onClick={() => regenerate()} className="rounded-lg bg-white/5 px-3 py-2 text-xs text-red-100 transition hover:bg-white/10">Retry</button></div>}
+                {busy && <div className="flex items-center gap-3"><div className="grid size-8 place-items-center rounded-xl border border-violet-300/10 bg-violet-400/8"><Bot className="size-4 text-violet-200" /></div><div className="wick-pop text-sm text-zinc-500">WickAI is thinking…</div></div>}
+                {error && <div className="rounded-2xl border border-red-400/10 bg-red-400/5 px-4 py-3 text-sm text-red-300">Something went wrong. Please try again.</div>}
                 <div ref={bottomRef} />
               </div>
             )}
           </div>
+        </section>
 
-          <form onSubmit={submit} className="sticky bottom-0 z-10 mt-5 pt-2">
-            <div className="glass-strong rounded-[26px] p-2 shadow-[0_20px_70px_rgba(0,0,0,.35)] transition focus-within:border-white/[.14]">
-              <textarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(event as unknown as React.FormEvent); } }} rows={2} placeholder="Ask WickAI anything…" className="max-h-44 min-h-[58px] w-full resize-none bg-transparent px-3 py-2.5 text-[15px] leading-6 text-zinc-100 outline-none placeholder:text-zinc-600" disabled={busy} aria-label="Message WickAI" />
-              <div className="flex items-center justify-between px-1 pb-1">
-                <div className="flex items-center gap-1"><button type="button" title="Attachments coming soon" className="grid size-9 place-items-center rounded-xl text-zinc-600 transition hover:bg-white/[.05] hover:text-zinc-300"><Paperclip size={16} /></button><span className="hidden text-[11px] text-zinc-700 sm:inline">Enter to send · Shift+Enter for newline</span></div>
-                <button type={busy ? "button" : "submit"} onClick={busy ? stop : undefined} disabled={!busy && !input.trim()} className="grid size-10 place-items-center rounded-xl bg-white text-zinc-950 shadow-lg transition hover:scale-[1.035] hover:bg-zinc-100 disabled:scale-100 disabled:opacity-25" aria-label={busy ? "Stop generation" : "Send message"}>{busy ? <Square size={15} fill="currentColor" /> : <ArrowUp size={18} />}</button>
-              </div>
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-[#07070a] via-[#07070a]/95 to-transparent px-3 pb-3 pt-16 md:px-6">
+          <form onSubmit={handleSubmit} className="pointer-events-auto mx-auto flex w-full max-w-4xl items-end gap-2 rounded-2xl border border-white/8 bg-white/[0.035] p-2 shadow-2xl shadow-black/20 backdrop-blur-2xl">
+            <button type="button" className="rounded-xl p-2.5 text-zinc-500 hover:bg-white/7 hover:text-zinc-200" aria-label="Attach file"><Paperclip className="size-5" /></button>
+            <textarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submitMessage(input); } }} rows={1} placeholder="Message WickAI..." className="max-h-40 min-h-11 flex-1 resize-none bg-transparent px-2 py-2.5 text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-600" />
+            <div className="flex items-center gap-1">
+              <div className="sm:hidden"><select value={model} onChange={(event) => setModel(event.target.value)} aria-label="Select model" className="max-w-[110px] appearance-none rounded-xl border border-white/8 bg-white/4 px-2.5 py-2.5 text-[11px] text-zinc-300 outline-none"><option value="wick-fast">Fast</option><option value="wick-1.5">1.5</option><option value="wick-ultra2.3">Ultra 2.3</option><option value="wick-chat">Chat</option></select></div>
+              {busy ? <button type="button" onClick={stop} className="grid size-11 place-items-center rounded-xl bg-white/8 text-zinc-200 hover:bg-white/12" aria-label="Stop generating"><Square className="size-4" /></button> : <button type="submit" disabled={!input.trim()} className="grid size-11 place-items-center rounded-xl bg-white text-black transition disabled:cursor-not-allowed disabled:opacity-30 hover:bg-zinc-200" aria-label="Send message"><ArrowUp className="size-5" /></button>}
             </div>
-            <p className="mt-2 text-center text-[10px] text-zinc-700">WickAI may make mistakes. Check important information.</p>
           </form>
+          <div className="mx-auto mt-2 max-w-4xl text-center text-[10px] text-zinc-700">WickAI can make mistakes. Check important information.</div>
         </div>
-      </section>
-    </main>
+      </main>
+    </div>
   );
 }
