@@ -19,8 +19,8 @@ function TextShimmerComponent({
   children,
   as: Component = "p",
   className,
-  duration = 2,
-  spread = 2,
+  duration = 2.2,
+  spread = 2.5,
   baseColor,
   shimmerColor,
   style,
@@ -29,27 +29,35 @@ function TextShimmerComponent({
     Component as keyof JSX.IntrinsicElements,
   );
 
-  const dynamicSpread = useMemo(() => children.length * spread, [children, spread]);
+  const dynamicSpread = useMemo(
+    () => Math.min(children.length * spread, 120),
+    [children.length, spread],
+  );
 
   return (
     <MotionComponent
       className={cn(
-        "relative inline-block bg-size-[250%_100%,auto] bg-clip-text",
+        "relative inline-block bg-clip-text",
         "[-webkit-text-fill-color:transparent]",
-        "[background-repeat:no-repeat,padding-box] [--bg:linear-gradient(90deg,#0000_calc(50%-var(--spread)),var(--base-gradient-color),#0000_calc(50%+var(--spread)))]",
+        "[background-repeat:no-repeat,padding-box]",
         className,
       )}
-      initial={{ backgroundPosition: "100% center" }}
-      animate={{ backgroundPosition: "0% center" }}
-      transition={{ repeat: Infinity, duration, ease: "linear" }}
+      initial={{ backgroundPosition: "180% 50%", skewX: 0 }}
+      animate={{
+        backgroundPosition: ["180% 50%", "55% 48%", "-40% 52%"],
+        skewX: [0, -1.5, 0, 1.5, 0],
+      }}
+      transition={{
+        repeat: Infinity,
+        duration,
+        ease: [0.37, 0, 0.63, 1],
+        times: [0, 0.5, 1],
+      }}
       style={
         {
           ...style,
-          "--spread": `${dynamicSpread}px`,
-          "--base-color":
-            baseColor ?? "color-mix(in oklab, currentColor 55%, transparent)",
-          "--base-gradient-color": shimmerColor ?? "currentColor",
-          backgroundImage: `var(--bg), linear-gradient(var(--base-color), var(--base-color))`,
+          backgroundSize: "280% 100%, 100% 100%",
+          backgroundImage: `linear-gradient(112deg, transparent calc(50% - ${dynamicSpread}px), ${shimmerColor ?? "currentColor"} 50%, transparent calc(50% + ${dynamicSpread}px)), linear-gradient(${baseColor ?? "color-mix(in oklab, currentColor 35%, transparent)"}, ${baseColor ?? "color-mix(in oklab, currentColor 35%, transparent)"})`,
         } as React.CSSProperties
       }
     >
