@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import "./wick-overrides.css";
 import "./wick-v4.css";
 
 export const metadata: Metadata = {
