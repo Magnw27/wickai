@@ -85,14 +85,28 @@ button:disabled { cursor: not-allowed; }
 .wick-rise { animation: wick-rise .55s cubic-bezier(.22, 1, .36, 1) both; }
 .wick-pop { animation: wick-pop .35s cubic-bezier(.22, 1, .36, 1) both; }
 
-/* Shimmer loader inspired by the supplied Loading UI component. */
-.wick-pop.wick-thinking {
+/* Thinking state: replaces the dot spinner with a text shimmer. */
+.wick-pop {
   gap: .65rem;
-  color: rgba(161,161,170,.42);
+  color: transparent !important;
 }
-
-.wick-thinking > .wick-shimmer-text {
+.wick-pop > span {
+  display: none !important;
+}
+.wick-pop::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgba(167,139,250,.92);
+  box-shadow: 0 0 14px rgba(167,139,250,.6);
+  animation: wick-pulse 1.6s ease-in-out infinite;
+}
+.wick-pop::after {
+  content: "WickAI is thinking…";
   display: inline-block;
+  color: transparent;
   background-image: linear-gradient(90deg, rgba(161,161,170,.28) 0%, rgba(244,244,245,.98) 50%, rgba(161,161,170,.28) 100%);
   background-size: 250% 100%;
   background-position: 100% center;
@@ -101,17 +115,6 @@ button:disabled { cursor: not-allowed; }
   -webkit-text-fill-color: transparent;
   background-repeat: no-repeat;
   animation: wick-text-shimmer 2.1s linear infinite;
-}
-
-.wick-thinking::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  background: rgba(167,139,250,.9);
-  box-shadow: 0 0 14px rgba(167,139,250,.55);
-  animation: wick-pulse 1.6s ease-in-out infinite;
 }
 
 .wick-cursor::after {
