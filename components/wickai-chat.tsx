@@ -1,104 +1,195 @@
 "use client";
 
+import { useAISDKRuntime } from "@assistant-ui/ai-sdk";
+import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { useChat } from "@ai-sdk/react";
-import { ArrowUp, Bot, Check, Copy, Database, LogIn, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, Search, Settings2, ShieldCheck, Sparkles, Square, Trash2, UserRound, X } from "lucide-react";
+import {
+  Archive,
+  ArrowDown,
+  ArrowUp,
+  Check,
+  ChevronDown,
+  Copy,
+  Database,
+  FileText,
+  History,
+  LogIn,
+  LogOut,
+  Menu,
+  MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Search,
+  Settings2,
+  ShieldCheck,
+  Sparkles,
+  Square,
+  Trash2,
+  UserRound,
+  X,
+} from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { TextShimmer } from "@/components/text-shimmer";
 
-type StoredChat = { id: string; title: string; updatedAt: number; messages: UIMessage[] };
+type StoredChat = {
+  id: string;
+  title: string;
+  updatedAt: number;
+  messages: UIMessage[];
+};
+
 type WickModel = { id: string; label: string };
-type LocalAccount = { username: string; passwordHash: string; createdAt: number; usageDay: string; messageCount: number; memory: string };
+type Account = {
+  username: string;
+  passwordHash: string;
+  createdAt: number;
+  usageDay: string;
+  messageCount: number;
+  memory: string;
+};
+
 type AuthMode = "login" | "register";
 
+const STORAGE_PREFIX = "wickai:v2";
+const SESSION_KEY = `${STORAGE_PREFIX}:session`;
+const ACCOUNTS_KEY = `${STORAGE_PREFIX}:accounts`;
+const LIMIT_PER_DAY = 30;
+const SECTION_SEPARATOR = "---WICK-SECTION---";
 const fallbackModels: WickModel[] = [
   { id: "wick-fast", label: "Wick Fast" },
   { id: "wick-1.5", label: "Wick 1.5" },
   { id: "wick-ultra2.3", label: "Wick Ultra 2.3" },
   { id: "wick-chat", label: "Wick Chat" },
 ];
-const starterPrompts = [
-  "Jelasin apa yang dimaksud AI?",
-  "Bantu aku bikin fitur Next.js yang rapi",
-  "Ubah ide kasarku jadi roadmap yang jelas",
-  "Review kode ini dan cari bagian yang bisa dioptimalkan",
-];
-const MESSAGE_LIMIT = 25;
-const SESSION_KEY = "wickai:session:v2";
-const ACCOUNT_KEY = "wickai:account:v2";
-const WICK_LOGO = "https://api.dicebear.com/9.x/icons/png?seed=wickai&backgroundColor=0b0b12";
 
-function messageText(message: UIMessage) {
-  return message.parts.filter((part) => part.type === "text").map((part) => part.text).join("");
+const starterPrompts = [
+  "Jelaskan apa itu AI secara sederhana",
+  "Bantu saya membangun fitur Next.js",
+  "Ubah ide saya menjadi rencana yang jelas",
+  "Review kode saya dan cari cara memperbaikinya",
+];
+
+function chatKey(username: string) {
+  return `${STORAGE_PREFIX}:chats:${username}`;
 }
-function sectionize(text: string) {
-  return text.split(/\n\n---WICK-SECTION---\n\n/g).filter((section) => section.trim());
-}
-function chatStorageKey(username: string) {
-  return `wickai:chats:${username.toLowerCase()}`;
-}
-async function hashSecret(secret: string) {
-  const buffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
-  return Array.from(new Uint8Array(buffer)).map((item) => item.toString(16).padStart(2, "0")).join("");
-}
+
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function textOf(message: UIMessage) {
+  return message.parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("");
+}
+
+function sectionsOf(text: string) {
+  return text
+    .split(SECTION_SEPARATOR)
+    .map((section) => section.trim())
+    .filter(Boolean);
+}
+
+async function hashPassword(password: string) {
+  const data = new TextEncoder().encode(password);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export function WickAIChat() {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [input, setInput] = useState("");
+  const [mobileInfoOpen, setMobileInfoOpen] = useState(false);
+  const [composer, setComposer] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
   const [model, setModel] = useState(fallbackModels[0].id);
   const [models, setModels] = useState(fallbackModels);
   const [chatId, setChatId] = useState(() => `chat_${Date.now()}`);
   const [history, setHistory] = useState<StoredChat[]>([]);
-  const [memory, setMemory] = useState("");
-  const [account, setAccount] = useState<LocalAccount | null>(null);
-  const [authMode, setAuthMode] = useState<AuthMode>("login");
-  const [authOpen, setAuthOpen] = useState(true);
-  const [authUsername, setAuthUsername] = useState("");
-  const [authPassword, setAuthPassword] = useState("");
-  const [authBusy, setAuthBusy] = useState(false);
+  const [account, setAccount] = useState<Account | null>(null);
+  const [authMode, setAuthMode] = useState<AuthMode | null>(null);
+  const [usernameInput, setUsernameInput] = useState("");
+  const [passwordInput, setPasswordInput] = useState("");
   const [authError, setAuthError] = useState("");
-  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [memoryDraft, setMemoryDraft] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const [darkAccent, setDarkAccent] = useState("violet");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const transport = useMemo(() => new DefaultChatTransport({ api: "/api/chat" }), []);
-  const { messages, setMessages, sendMessage, status, stop, error, regenerate } = useChat({ transport });
+
+  const transport = useMemo(
+    () => new DefaultChatTransport({ api: "/api/chat" }),
+    [],
+  );
+
+  const chat = useChat({ transport });
+  const runtime = useAISDKRuntime(chat);
+  const { messages, setMessages, sendMessage, status, stop, error, regenerate } = chat;
   const busy = status === "submitted" || status === "streaming";
-  const remaining = Math.max(0, MESSAGE_LIMIT - (account?.messageCount ?? 0));
+  const usage = account
+    ? Math.min(account.messageCount, LIMIT_PER_DAY)
+    : 0;
+  const remaining = Math.max(LIMIT_PER_DAY - usage, 0);
+
+  const filteredHistory = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return history;
+    return history.filter((item) => item.title.toLowerCase().includes(query));
+  }, [history, search]);
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem(ACCOUNT_KEY) || localStorage.getItem(SESSION_KEY);
-      if (saved) setAccount(JSON.parse(saved) as LocalAccount);
+      const currentUser = localStorage.getItem(SESSION_KEY);
+      const rawAccounts = localStorage.getItem(ACCOUNTS_KEY);
+      if (currentUser && rawAccounts) {
+        const accounts = JSON.parse(rawAccounts) as Record<string, Account>;
+        const current = accounts[currentUser];
+        if (current) {
+          const normalized =
+            current.usageDay === todayKey()
+              ? current
+              : { ...current, usageDay: todayKey(), messageCount: 0 };
+          setAccount(normalized);
+          setMemoryDraft(normalized.memory);
+          localStorage.setItem(ACCOUNTS_KEY, JSON.stringify({ ...accounts, [currentUser]: normalized }));
+        }
+      }
     } catch {
-      setAccount(null);
+      // Ignore malformed local account data.
     }
   }, []);
 
   useEffect(() => {
-    if (!account) return;
+    if (!account) {
+      setHistory([]);
+      setMessages([]);
+      return;
+    }
     try {
-      const raw = localStorage.getItem(chatStorageKey(account.username));
-      const stored = raw ? (JSON.parse(raw) as StoredChat[]) : [];
-      const sorted = Array.isArray(stored) ? stored.sort((a, b) => b.updatedAt - a.updatedAt) : [];
+      const raw = localStorage.getItem(chatKey(account.username));
+      if (!raw) return;
+      const stored = JSON.parse(raw) as StoredChat[];
+      if (!Array.isArray(stored)) return;
+      const sorted = stored.sort((a, b) => b.updatedAt - a.updatedAt);
       setHistory(sorted);
-      setMemory(account.memory || "");
       if (sorted[0]) {
         setChatId(sorted[0].id);
         setMessages(sorted[0].messages);
-      } else {
-        setMessages([]);
       }
     } catch {
-      setHistory([]);
-      setMessages([]);
+      // Ignore malformed chat history.
     }
-    setAuthOpen(false);
   }, [account, setMessages]);
 
   useEffect(() => {
@@ -107,7 +198,9 @@ export function WickAIChat() {
       .then((data: { models?: WickModel[] }) => {
         if (!data.models?.length) return;
         setModels(data.models);
-        setModel((current) => data.models!.some((item) => item.id === current) ? current : data.models![0].id);
+        setModel((current) =>
+          data.models!.some((item) => item.id === current) ? current : data.models![0].id,
+        );
       })
       .catch(() => undefined);
   }, []);
@@ -115,156 +208,452 @@ export function WickAIChat() {
   useEffect(() => {
     if (!account || !messages.length) return;
     const firstUser = messages.find((message) => message.role === "user");
-    const title = firstUser ? messageText(firstUser).trim().slice(0, 52) || "New conversation" : "New conversation";
+    const title = firstUser
+      ? textOf(firstUser).trim().replace(/\s+/g, " ").slice(0, 54) || "New conversation"
+      : "New conversation";
     const next: StoredChat = { id: chatId, title, updatedAt: Date.now(), messages };
     setHistory((current) => {
-      const merged = [next, ...current.filter((item) => item.id !== chatId)].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 50);
-      try { localStorage.setItem(chatStorageKey(account.username), JSON.stringify(merged)); } catch {}
+      const merged = [next, ...current.filter((item) => item.id !== chatId)]
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, 50);
+      try {
+        localStorage.setItem(chatKey(account.username), JSON.stringify(merged));
+      } catch {
+        // Ignore storage limits.
+      }
       return merged;
     });
-  }, [account, messages, chatId]);
+  }, [messages, chatId, account]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const onScroll = () => {
+      const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      setShowScrollButton(distance > 320);
+    };
+    viewport.addEventListener("scroll", onScroll, { passive: true });
+    return () => viewport.removeEventListener("scroll", onScroll);
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, status]);
 
-  useEffect(() => {
-    setAuthOpen(!account);
-  }, [account]);
-
   const startNewChat = () => {
     stop();
     setChatId(`chat_${Date.now()}`);
     setMessages([]);
-    setInput("");
+    setComposer("");
+    setSettingsOpen(false);
+    setMemoryOpen(false);
+    textareaRef.current?.focus();
     setSidebarOpen(false);
-    requestAnimationFrame(() => textareaRef.current?.focus());
   };
 
-  const openChat = (chat: StoredChat) => {
-    stop(); setChatId(chat.id); setMessages(chat.messages); setInput(""); setSidebarOpen(false);
+  const openChat = (chatItem: StoredChat) => {
+    stop();
+    setChatId(chatItem.id);
+    setMessages(chatItem.messages);
+    setComposer("");
+    setSidebarOpen(false);
   };
 
   const clearHistory = () => {
     if (!account) return;
-    setHistory([]); setMessages([]);
-    try { localStorage.removeItem(chatStorageKey(account.username)); } catch {}
+    setHistory([]);
+    try {
+      localStorage.removeItem(chatKey(account.username));
+    } catch {
+      // Ignore storage errors.
+    }
     startNewChat();
   };
 
-  const copyMessage = async (id: string, text: string) => {
-    try { await navigator.clipboard.writeText(text); setCopied(id); window.setTimeout(() => setCopied(null), 1400); } catch {}
-  };
-
-  const updateAccount = (next: LocalAccount) => {
-    setAccount(next);
-    try {
-      localStorage.setItem(ACCOUNT_KEY, JSON.stringify(next));
-      localStorage.setItem(SESSION_KEY, JSON.stringify(next));
-    } catch {}
-  };
-
-  const handleAuth = async (event: React.FormEvent) => {
-    event.preventDefault(); setAuthError("");
-    const username = authUsername.trim();
-    if (username.length < 3 || authPassword.length < 6) {
-      setAuthError("Username minimal 3 karakter dan password minimal 6 karakter."); return;
-    }
-    setAuthBusy(true);
-    try {
-      const passwordHash = await hashSecret(authPassword);
-      const savedRaw = localStorage.getItem(ACCOUNT_KEY);
-      const saved = savedRaw ? (JSON.parse(savedRaw) as LocalAccount) : null;
-      if (authMode === "register") {
-        if (saved) { setAuthError("Browser ini sudah memiliki akun lokal."); return; }
-        updateAccount({ username, passwordHash, createdAt: Date.now(), usageDay: todayKey(), messageCount: 0, memory: "" });
-      } else {
-        if (!saved || saved.username.toLowerCase() !== username.toLowerCase() || saved.passwordHash !== passwordHash) {
-          setAuthError("Username atau password tidak cocok."); return;
-        }
-        updateAccount(saved.usageDay === todayKey() ? saved : { ...saved, usageDay: todayKey(), messageCount: 0 });
-      }
-      setAuthPassword(""); setAuthUsername(""); setAuthOpen(false);
-    } catch {
-      setAuthError("Akun lokal gagal diproses di browser ini.");
-    } finally { setAuthBusy(false); }
-  };
-
   const logout = () => {
-    stop(); setAccount(null); setHistory([]); setMessages([]); setMemory(""); setAuthMode("login"); setAuthOpen(true);
-    try { localStorage.removeItem(SESSION_KEY); } catch {}
+    stop();
+    localStorage.removeItem(SESSION_KEY);
+    setAccount(null);
+    setAuthMode(null);
+    setHistory([]);
+    setMessages([]);
+    setChatId(`chat_${Date.now()}`);
   };
 
-  const saveMemory = (value: string) => {
-    setMemory(value); if (account) updateAccount({ ...account, memory: value });
+  const saveAccount = (next: Account) => {
+    const raw = localStorage.getItem(ACCOUNTS_KEY);
+    const accounts = raw ? (JSON.parse(raw) as Record<string, Account>) : {};
+    localStorage.setItem(ACCOUNTS_KEY, JSON.stringify({ ...accounts, [next.username]: next }));
+    localStorage.setItem(SESSION_KEY, next.username);
+    setAccount(next);
+    setMemoryDraft(next.memory);
+    setAuthMode(null);
+    setUsernameInput("");
+    setPasswordInput("");
+    setAuthError("");
   };
 
-  const submit = (text = input) => {
+  const submitAuth = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const username = usernameInput.trim().toLowerCase();
+    const password = passwordInput;
+    setAuthError("");
+    if (username.length < 3 || username.length > 24) {
+      setAuthError("Username harus 3–24 karakter.");
+      return;
+    }
+    if (password.length < 6) {
+      setAuthError("Password minimal 6 karakter.");
+      return;
+    }
+    const hash = await hashPassword(password);
+    const raw = localStorage.getItem(ACCOUNTS_KEY);
+    const accounts = raw ? (JSON.parse(raw) as Record<string, Account>) : {};
+    if (authMode === "register") {
+      if (accounts[username]) {
+        setAuthError("Akun sudah terdaftar.");
+        return;
+      }
+      saveAccount({
+        username,
+        passwordHash: hash,
+        createdAt: Date.now(),
+        usageDay: todayKey(),
+        messageCount: 0,
+        memory: "",
+      });
+      startNewChat();
+      return;
+    }
+    const found = accounts[username];
+    if (!found || found.passwordHash !== hash) {
+      setAuthError("Username atau password salah.");
+      return;
+    }
+    const next = found.usageDay === todayKey()
+      ? found
+      : { ...found, usageDay: todayKey(), messageCount: 0 };
+    saveAccount(next);
+    startNewChat();
+  };
+
+  const persistMemory = () => {
+    if (!account) return;
+    const next = { ...account, memory: memoryDraft.slice(0, 2400) };
+    saveAccount(next);
+    setMemoryOpen(false);
+  };
+
+  const copyMessage = async (id: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(id);
+      window.setTimeout(() => setCopied(null), 1400);
+    } catch {
+      // Ignore clipboard permissions.
+    }
+  };
+
+  const submit = (text = composer) => {
     const value = text.trim();
-    if (!value || busy || !account) return;
-    const normalizedAccount = account.usageDay === todayKey() ? account : { ...account, usageDay: todayKey(), messageCount: 0 };
-    if (normalizedAccount.messageCount >= MESSAGE_LIMIT) { setSettingsOpen(true); return; }
-    updateAccount({ ...normalizedAccount, messageCount: normalizedAccount.messageCount + 1 });
-    setInput("");
-    sendMessage({ text: value }, { body: { model, memory: memory.trim(), user: normalizedAccount.username } }).catch(() => undefined);
+    if (!value || busy) return;
+    if (!account) {
+      setAuthMode("login");
+      return;
+    }
+    if (remaining <= 0) return;
+    setComposer("");
+    const next = {
+      ...account,
+      usageDay: todayKey(),
+      messageCount: account.usageDay === todayKey() ? account.messageCount + 1 : 1,
+    };
+    saveAccount(next);
+    sendMessage({ text: value }, { body: { model, memory: next.memory, username: next.username } }).catch(() => undefined);
   };
 
-  const handleComposerKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); }
+  const onComposerKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      submit();
+    }
   };
+
+  const scrollToBottom = () => bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
 
   return (
-    <main className="wick-shell min-h-dvh">
-      <div className="wick-noise" aria-hidden="true" /><div className="wick-grid" aria-hidden="true" />
-      <div className="wick-orb wick-orb-a" aria-hidden="true" /><div className="wick-orb wick-orb-b" aria-hidden="true" /><div className="wick-orb wick-orb-c" aria-hidden="true" />
-      {sidebarOpen && <button type="button" className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm md:hidden" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar overlay" />}
+    <AssistantRuntimeProvider runtime={runtime}>
+      <main className={`wick-app ${darkAccent === "blue" ? "wick-accent-blue" : "wick-accent-violet"}`}>
+        <div className="wick-aurora" aria-hidden="true" />
+        <div className="wick-grid" aria-hidden="true" />
 
-      <aside className={`wick-sidebar glass-strong fixed inset-y-0 left-0 z-40 flex flex-col border-y-0 border-l-0 p-3 shadow-2xl transition-all duration-300 md:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} ${sidebarCollapsed ? "md:w-[82px]" : "md:w-[300px]"}`}>
-        <div className="flex items-center gap-3 px-2 py-2">
-          <img src={WICK_LOGO} alt="WickAI" className="size-10 rounded-xl ring-1 ring-white/10" />
-          {!sidebarCollapsed && <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">WickAI</p><p className="truncate text-xs text-zinc-500">Private AI workspace</p></div>}
-          <button type="button" className="hidden rounded-lg p-2 text-zinc-500 transition hover:bg-white/6 hover:text-zinc-200 md:block" onClick={() => setSidebarCollapsed((value) => !value)} aria-label="Toggle sidebar">{sidebarCollapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}</button>
-          <button type="button" className="rounded-lg p-2 text-zinc-500 md:hidden" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar"><X className="size-4" /></button>
-        </div>
-        <button type="button" onClick={startNewChat} className={`wick-button-primary mt-3 flex items-center justify-center gap-2 rounded-2xl px-3 py-2.5 text-sm font-medium ${sidebarCollapsed ? "md:px-2" : ""}`}><Plus className="size-4" />{!sidebarCollapsed && "New chat"}</button>
-
-        {!sidebarCollapsed && <>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <button type="button" onClick={() => setMemoryOpen((value) => !value)} className="wick-mini-card"><Database className="size-4" /><span>Memory</span></button>
-            <button type="button" onClick={() => setSettingsOpen((value) => !value)} className="wick-mini-card"><Settings2 className="size-4" /><span>Settings</span></button>
-          </div>
-          <div className="mt-3 rounded-2xl border border-white/8 bg-black/10 p-3"><div className="flex items-center justify-between gap-2"><div className="flex items-center gap-2 text-xs text-zinc-500"><ShieldCheck className="size-3.5" />Daily usage</div><span className="text-xs font-medium text-zinc-300">{remaining}/{MESSAGE_LIMIT}</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/6"><div className="h-full rounded-full bg-violet-300/80 transition-all" style={{ width: `${(remaining / MESSAGE_LIMIT) * 100}%` }} /></div></div>
-          <div className="mt-3 flex items-center gap-2 rounded-2xl border border-white/8 bg-black/10 px-3 py-2 text-xs text-zinc-500"><Search className="size-3.5" />Conversation library</div>
-        </>}
-
-        <div className="wick-scrollbar mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
-          {history.length ? history.map((chat) => <button type="button" key={chat.id} onClick={() => openChat(chat)} title={sidebarCollapsed ? chat.title : undefined} className={`wick-history-item w-full rounded-2xl px-3 py-2.5 text-left transition ${chat.id === chatId ? "active" : ""}`}><div className="flex items-center gap-2"><Sparkles className="size-3.5 shrink-0 text-violet-300/70" />{!sidebarCollapsed && <div className="min-w-0"><p className="truncate text-sm text-zinc-200">{chat.title}</p><p className="mt-0.5 text-[11px] text-zinc-600">{new Date(chat.updatedAt).toLocaleDateString()}</p></div>}</div></button>) : !sidebarCollapsed ? <div className="rounded-2xl border border-dashed border-white/8 p-4 text-xs leading-5 text-zinc-600">Your conversations, saved locally for this account, will appear here.</div> : null}
-        </div>
-
-        {!sidebarCollapsed && <div className="mt-3 border-t border-white/6 pt-3">
-          {memoryOpen && <div className="wick-panel mb-2 rounded-2xl p-3"><div className="mb-2 flex items-center gap-2 text-xs font-medium text-zinc-300"><Database className="size-3.5 text-violet-300" />Memory</div><textarea value={memory} onChange={(event) => saveMemory(event.target.value)} placeholder="Contoh: Aku suka jawaban teknis yang ringkas..." className="min-h-24 w-full resize-none rounded-xl border border-white/8 bg-black/15 p-3 text-xs leading-5 text-zinc-200 outline-none placeholder:text-zinc-600" /></div>}
-          {settingsOpen && <div className="wick-panel mb-2 rounded-2xl p-3"><div className="mb-2 flex items-center gap-2 text-xs font-medium text-zinc-300"><Settings2 className="size-3.5 text-violet-300" />Workspace controls</div><p className="text-[11px] leading-5 text-zinc-500">Local account mode aktif. Limit harian, memory, dan history berlaku di browser ini.</p><button type="button" onClick={clearHistory} className="mt-3 flex w-full items-center gap-2 rounded-xl px-2 py-2 text-xs text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200"><Trash2 className="size-3.5" />Clear conversations</button></div>}
-          <div className="flex items-center gap-2 rounded-2xl border border-white/8 bg-black/10 p-2"><img src={`https://api.dicebear.com/9.x/initials/png?seed=${encodeURIComponent(account?.username ?? "W")}&backgroundColor=7c5cff`} alt="Account" className="size-8 rounded-xl" /><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-zinc-200">{account?.username}</p><p className="truncate text-[10px] text-zinc-600">Local account</p></div><button type="button" onClick={logout} className="rounded-lg p-2 text-zinc-500 transition hover:bg-white/6 hover:text-zinc-200" aria-label="Logout"><LogOut className="size-3.5" /></button></div>
-        </div>}
-      </aside>
-
-      <section className={`min-h-dvh transition-[padding] duration-300 ${sidebarCollapsed ? "md:pl-[82px]" : "md:pl-[300px]"}`}>
-        <header className="wick-topbar sticky top-0 z-20 flex h-[72px] items-center justify-between px-4 md:px-6">
-          <div className="flex items-center gap-2"><button type="button" className="wick-icon-button md:hidden" onClick={() => setSidebarOpen(true)} aria-label="Open sidebar"><Menu className="size-4" /></button><div className="glass flex items-center gap-2 rounded-2xl px-2 py-1.5"><img src={WICK_LOGO} alt="WickAI" className="size-7 rounded-lg" /><div className="hidden sm:block"><p className="text-[10px] uppercase tracking-[0.18em] text-zinc-600">Model</p></div><select value={model} onChange={(event) => setModel(event.target.value)} className="max-w-[180px] bg-transparent px-1.5 py-1 text-sm font-medium text-zinc-100 outline-none" aria-label="Select model">{models.map((item) => <option key={item.id} value={item.id} className="bg-zinc-950">{item.label}</option>)}</select></div></div>
-          <div className="hidden items-center gap-2 sm:flex"><div className="wick-status-chip"><span className="wick-status-dot" />Streaming online</div><button type="button" className="wick-icon-button" onClick={startNewChat} aria-label="New chat"><Plus className="size-4" /></button></div>
-        </header>
-
-        <div className="mx-auto flex min-h-[calc(100dvh-4.5rem)] w-full max-w-5xl flex-col px-4 pb-5 sm:px-6">
-          <div className="wick-scrollbar flex-1 overflow-y-auto py-8 sm:py-12">
-            {!messages.length ? <div className="wick-hero wick-rise flex min-h-[64dvh] flex-col items-center justify-center text-center"><div className="wick-hero-logo"><img src={WICK_LOGO} alt="WickAI" className="size-full rounded-[22px]" /></div><div className="mt-5 flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-violet-200/60"><span>WickAI</span><span className="size-1 rounded-full bg-violet-300/50" /><span>AI Workspace</span></div><h1 className="mt-4 max-w-3xl text-3xl font-semibold tracking-[-0.03em] text-white sm:text-5xl">Build thoughts into something real.</h1><p className="mt-4 max-w-2xl text-sm leading-7 text-zinc-500 sm:text-base">Streaming responses, local memory, conversation history, and a focused interface designed around WickAI.</p><div className="mt-8 grid w-full max-w-3xl gap-3 sm:grid-cols-2">{starterPrompts.map((prompt, index) => <button key={prompt} type="button" onClick={() => submit(prompt)} className="wick-prompt-card wick-rise group text-left" style={{ animationDelay: `${index * 70}ms` }}><span className="wick-prompt-number">0{index + 1}</span><span className="min-w-0 flex-1 text-sm leading-6 text-zinc-300">{prompt}</span><ArrowUp className="size-4 -rotate-45 text-zinc-700 transition group-hover:text-zinc-300" /></button>)}</div></div> : <div className="space-y-8">{messages.map((message) => { const text = messageText(message); const isUser = message.role === "user"; const sections = isUser ? [text] : sectionize(text); return <article key={message.id} className={`wick-message ${isUser ? "user-message" : "assistant-message"}`}><div className="wick-avatar-wrap">{isUser ? <img src={`https://api.dicebear.com/9.x/initials/png?seed=${encodeURIComponent(account?.username ?? "W")}&backgroundColor=7c5cff`} alt="You" className="wick-avatar" /> : <img src={WICK_LOGO} alt="WickAI" className="wick-avatar" />}</div><div className="min-w-0 flex-1"><div className="mb-2 flex items-center gap-2"><span className="text-xs font-medium text-zinc-300">{isUser ? account?.username : "WickAI"}</span>{!isUser && <span className="text-[10px] text-violet-300/45">{models.find((item) => item.id === model)?.label}</span>}</div><div className="space-y-2.5">{sections.map((section, sectionIndex) => <div key={`${message.id}-${sectionIndex}`} className={`${isUser ? "wick-user-bubble" : "wick-ai-bubble"} wick-section-enter`} style={{ animationDelay: `${sectionIndex * 80}ms` }}><div className="wick-markdown whitespace-pre-wrap break-words text-[15px] leading-7 text-zinc-200">{section}</div>{!isUser && busy && message.id === messages[messages.length - 1]?.id && sectionIndex === sections.length - 1 && section ? <span className="wick-cursor" aria-hidden="true" /> : null}</div>)}</div>{!isUser && !busy && text && <div className="mt-2 flex items-center gap-1"><button type="button" onClick={() => copyMessage(message.id, text)} className="wick-inline-button" aria-label="Copy response">{copied === message.id ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}</button>{message.id === messages[messages.length - 1]?.id && <button type="button" onClick={() => regenerate()} className="wick-inline-button px-2">Regenerate</button>}</div>}</div></article>; })}{status === "submitted" && <div className="wick-thinking ml-11 flex items-center gap-2"><TextShimmer className="text-sm font-medium text-zinc-500" duration={2.1} spread={2}>WickAI is thinking...</TextShimmer></div>}{error && <div className="wick-rise ml-11 rounded-2xl border border-red-400/10 bg-red-400/5 px-4 py-3 text-sm leading-6 text-red-200">{error.message || "Something went wrong while generating the response."}</div>}<div ref={bottomRef} /></div>}
+        <aside
+          className={`wick-sidebar ${sidebarCollapsed ? "is-collapsed" : ""} ${sidebarOpen ? "is-mobile-open" : ""}`}
+          aria-label="Conversation sidebar"
+        >
+          <div className="wick-brand">
+            <img src="https://api.dicebear.com/9.x/shapes/png?seed=wickai&backgroundColor=0b0b12" alt="WickAI" />
+            {!sidebarCollapsed && (
+              <div className="min-w-0">
+                <div className="wick-brand-name">WickAI</div>
+                <div className="wick-brand-sub">AI workspace</div>
+              </div>
+            )}
+            {!sidebarCollapsed && (
+              <button className="wick-icon-button ml-auto md-only" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar">
+                <X size={16} />
+              </button>
+            )}
           </div>
 
-          <form className="wick-composer glass-strong sticky bottom-3 rounded-[28px] p-2.5" onSubmit={(event) => { event.preventDefault(); submit(); }}><div className="flex items-end gap-2"><div className="min-w-0 flex-1"><textarea ref={textareaRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder="Message WickAI..." rows={1} disabled={!account || busy || remaining === 0} className="max-h-44 min-h-12 w-full resize-none bg-transparent px-3 py-3 text-sm leading-6 text-zinc-100 outline-none placeholder:text-zinc-600" aria-label="Message WickAI" /><div className="flex items-center justify-between px-3 pb-1 text-[10px] text-zinc-600"><span>Enter send · Shift + Enter newline</span><span>{remaining} requests left today</span></div></div>{busy ? <button type="button" onClick={() => stop()} className="wick-send-button stop" aria-label="Stop generating"><Square className="size-4 fill-current" /></button> : <button type="submit" disabled={!input.trim() || !account || remaining === 0} className="wick-send-button" aria-label="Send message"><ArrowUp className="size-4" /></button>}</div></form>
-          <p className="pt-2 text-center text-[10px] text-zinc-700">WickAI can make mistakes. Verify important information.</p>
-        </div>
-      </section>
+          <div className="wick-sidebar-actions">
+            <button className="wick-new-chat" onClick={startNewChat}>
+              <Plus size={17} />
+              {!sidebarCollapsed && <span>New chat</span>}
+            </button>
+            <button className="wick-icon-button sidebar-collapse-button" onClick={() => setSidebarCollapsed((value) => !value)} aria-label="Toggle sidebar">
+              {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+            </button>
+          </div>
 
-      {authOpen && <div className="fixed inset-0 z-[60] grid place-items-center bg-black/65 p-4 backdrop-blur-xl"><div className="wick-auth glass-strong w-full max-w-md rounded-[30px] p-6 shadow-2xl"><div className="flex items-start gap-3"><div className="min-w-0 flex-1"><img src={WICK_LOGO} alt="WickAI" className="size-12 rounded-2xl" /><h2 className="mt-4 text-xl font-semibold text-white">{authMode === "login" ? "Welcome back" : "Create your WickAI account"}</h2><p className="mt-1 text-sm leading-6 text-zinc-500">Local account mode untuk mengatur history, memory, dan limit di browser ini.</p></div></div><div className="mt-5 grid grid-cols-2 rounded-2xl bg-black/15 p-1"><button type="button" onClick={() => setAuthMode("login")} className={`rounded-xl px-3 py-2 text-sm ${authMode === "login" ? "bg-white/8 text-white" : "text-zinc-600"}`}>Login</button><button type="button" onClick={() => setAuthMode("register")} className={`rounded-xl px-3 py-2 text-sm ${authMode === "register" ? "bg-white/8 text-white" : "text-zinc-600"}`}>Register</button></div><form className="mt-5 space-y-3" onSubmit={handleAuth}><input value={authUsername} onChange={(event) => setAuthUsername(event.target.value)} placeholder="Username" className="wick-auth-input" autoComplete="username" /><input type="password" value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} placeholder="Password" className="wick-auth-input" autoComplete={authMode === "login" ? "current-password" : "new-password"} />{authError && <p className="rounded-xl border border-red-400/10 bg-red-400/5 px-3 py-2 text-xs leading-5 text-red-200">{authError}</p>}<button type="submit" disabled={authBusy} className="wick-button-primary flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium">{authMode === "login" ? <LogIn className="size-4" /> : <Plus className="size-4" />}{authBusy ? "Processing..." : authMode === "login" ? "Continue" : "Create account"}</button></form></div></div>}
-    </main>
+          {!sidebarCollapsed && (
+            <>
+              <label className="wick-search">
+                <Search size={15} />
+                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search conversations" />
+                <kbd>/</kbd>
+              </label>
+
+              <div className="wick-side-section-label">Recent</div>
+              <div className="wick-history wick-scrollbar">
+                {filteredHistory.length ? (
+                  filteredHistory.map((item) => (
+                    <button key={item.id} className={`wick-thread-row ${item.id === chatId ? "is-active" : ""}`} onClick={() => openChat(item)}>
+                      <History size={15} />
+                      <span className="truncate">{item.title}</span>
+                      <span className="wick-thread-more"><MoreHorizontal size={15} /></span>
+                    </button>
+                  ))
+                ) : (
+                  <div className="wick-empty-side">
+                    <Archive size={18} />
+                    <span>Your conversations will appear here.</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="wick-sidebar-spacer" />
+
+              <div className="wick-usage-card">
+                <div className="wick-usage-icon"><ShieldCheck size={15} /></div>
+                <div className="min-w-0 flex-1">
+                  <div className="wick-usage-top"><span>Daily usage</span><strong>{remaining}</strong></div>
+                  <div className="wick-progress"><span style={{ width: `${Math.min((usage / LIMIT_PER_DAY) * 100, 100)}%` }} /></div>
+                  <p>{account ? `${usage}/${LIMIT_PER_DAY} messages used today` : "Login to track your usage"}</p>
+                </div>
+              </div>
+
+              <div className="wick-account-card">
+                <div className="wick-avatar"><img src={`https://api.dicebear.com/9.x/initials/png?seed=${account?.username || "Guest"}&backgroundColor=11111a&fontSize=42`} alt="Account" /></div>
+                {!account ? (
+                  <button className="wick-account-main" onClick={() => setAuthMode("login")}>
+                    <span>Sign in</span>
+                    <small>Save chats & memory</small>
+                  </button>
+                ) : (
+                  <div className="wick-account-main">
+                    <span>{account.username}</span>
+                    <small>WickAI member</small>
+                  </div>
+                )}
+                <button className="wick-icon-button" onClick={() => setSettingsOpen((value) => !value)} aria-label="Settings"><Settings2 size={16} /></button>
+              </div>
+
+              {settingsOpen && (
+                <div className="wick-sidebar-popover">
+                  <button onClick={() => setMemoryOpen(true)}><Database size={15} /> Memory</button>
+                  <button onClick={() => setDarkAccent((value) => value === "violet" ? "blue" : "violet")}><Sparkles size={15} /> Accent: {darkAccent}</button>
+                  {account && <button onClick={clearHistory}><Trash2 size={15} /> Clear history</button>}
+                  {account && <button onClick={logout}><LogOut size={15} /> Log out</button>}
+                </div>
+              )}
+            </>
+          )}
+        </aside>
+
+        {sidebarOpen && <button className="wick-mobile-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar" />}
+
+        <section className={`wick-main ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+          <header className="wick-topbar">
+            <div className="wick-topbar-left">
+              <button className="wick-icon-button mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open sidebar"><Menu size={17} /></button>
+              <div className="wick-model-picker">
+                <div className="wick-model-mark"><Sparkles size={14} /></div>
+                <div className="wick-model-copy">
+                  <span>WickAI</span>
+                  <strong>{models.find((item) => item.id === model)?.label ?? model}</strong>
+                </div>
+                <ChevronDown size={14} />
+                <select value={model} onChange={(event) => setModel(event.target.value)} aria-label="Select model">
+                  {models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="wick-topbar-right">
+              {account && <button className="wick-pill" onClick={() => setMemoryOpen(true)}><Database size={13} /> Memory</button>}
+              {!account && <button className="wick-pill" onClick={() => setAuthMode("login")}><LogIn size={13} /> Sign in</button>}
+              <button className="wick-icon-button" onClick={startNewChat} aria-label="New chat"><Plus size={16} /></button>
+            </div>
+          </header>
+
+          <div ref={viewportRef} className="wick-thread-viewport wick-scrollbar">
+            {!messages.length ? (
+              <div className="wick-welcome">
+                <div className="wick-welcome-avatar">
+                  <img src="https://api.dicebear.com/9.x/shapes/png?seed=wickai-core&backgroundColor=11111a" alt="WickAI" />
+                  <span className="wick-live-dot" />
+                </div>
+                <div className="wick-eyebrow">Personal AI workspace</div>
+                <h1>What are we building today?</h1>
+                <p>WickAI turns questions, ideas, and code into focused conversations with fast streaming responses.</p>
+
+                <div className="wick-suggestion-grid">
+                  {starterPrompts.map((prompt, index) => (
+                    <button key={prompt} className="wick-suggestion" style={{ animationDelay: `${index * 70}ms` }} onClick={() => submit(prompt)}>
+                      <span>{prompt}</span>
+                      <ArrowUp size={15} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="wick-messages">
+                {messages.map((message, messageIndex) => {
+                  const rawText = textOf(message);
+                  const sections = sectionsOf(rawText);
+                  const isUser = message.role === "user";
+                  return (
+                    <article key={message.id} className={`wick-message ${isUser ? "is-user" : "is-assistant"}`}>
+                      <div className="wick-message-avatar">
+                        <img src={isUser
+                          ? `https://api.dicebear.com/9.x/initials/png?seed=${account?.username || "You"}&backgroundColor=11111a&fontSize=42`
+                          : "https://api.dicebear.com/9.x/shapes/png?seed=wickai-assistant&backgroundColor=11111a"} alt={isUser ? "You" : "WickAI"} />
+                      </div>
+                      <div className="wick-message-body">
+                        <div className="wick-message-meta"><span>{isUser ? (account?.username || "You") : "WickAI"}</span><small>{messageIndex + 1}</small></div>
+                        <div className="wick-section-stack">
+                          {sections.map((section, sectionIndex) => (
+                            <div key={`${message.id}-${sectionIndex}`} className={`wick-bubble ${isUser ? "wick-user-bubble" : "wick-ai-bubble"}`}>
+                              {isUser ? (
+                                <div className="whitespace-pre-wrap break-words">{section}</div>
+                              ) : (
+                                <div className="wick-markdown">
+                                  <ReactMarkdown
+                                    remarkPlugins={[remarkGfm]}
+                                    components={{
+                                      a: ({ ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+                                      pre: ({ children }) => <pre className="wick-code-block">{children}</pre>,
+                                      code: ({ className, children, ...props }) => (
+                                        <code className={className || "wick-inline-code"} {...props}>{children}</code>
+                                      ),
+                                      table: ({ children }) => <div className="wick-table-wrap"><table>{children}</table></div>,
+                                      blockquote: ({ children }) => <blockquote className="wick-quote">{children}</blockquote>,
+                                    }}
+                                  >{section}</ReactMarkdown>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                          {!isUser && busy && messageIndex === messages.length - 1 ? <span className="wick-stream-cursor" aria-hidden="true" /> : null}
+                        </div>
+                        {!isUser && !busy && rawText && (
+                          <div className="wick-action-row">
+                            <button onClick={() => copyMessage(message.id, rawText)}>{copied === message.id ? <Check size={14} /> : <Copy size={14} />} {copied === message.id ? "Copied" : "Copy"}</button>
+                            {messageIndex === messages.length - 1 && <button onClick={() => regenerate()}><ArrowDown size={14} /> Regenerate</button>}
+                          </div>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+
+                {status === "submitted" && (
+                  <div className="wick-thinking">
+                    <div className="wick-thinking-mark"><img src="https://api.dicebear.com/9.x/shapes/png?seed=wickai-thinking&backgroundColor=11111a" alt="" /></div>
+                    <TextShimmer className="wick-wave-text" duration={1.7} spread={2.8} baseColor="rgba(161,161,170,.3)" shimmerColor="rgba(244,244,245,.98)">WickAI is thinking…</TextShimmer>
+                  </div>
+                )}
+
+                {error && (
+                  <div className="wick-error">{error.message || "WickAI gagal memproses permintaan."}</div>
+                )}
+                <div ref={bottomRef} />
+              </div>
+            )}
+          </div>
+
+          {showScrollButton && <button className="wick-scroll-bottom" onClick={scrollToBottom} aria-label="Scroll to bottom"><ArrowDown size={16} /></button>}
+
+          <div className="wick-composer-wrap">
+            <form className="wick-composer" onSubmit={(event) => { event.preventDefault(); submit(); }}>
+              <div className="wick-composer-topline">
+                <span className="wick-composer-status"><span className="wick-status-dot" /> {busy ? "Streaming response" : account ? "Ready" : "Guest mode"}</span>
+                <span className="wick-composer-hint">Enter to send · Shift + Enter for new line</span>
+              </div>
+              <div className="wick-composer-row">
+                <textarea
+                  ref={textareaRef}
+                  value={composer}
+                  onChange={(event) => setComposer(event.target.value)}
+                  onKeyDown={onComposerKeyDown}
+                  placeholder="Message WickAI..."
+                  rows={1}
+                  disabled={busy}
+                  className="wick-textarea"
+                  aria-label="Message WickAI"
+                />
+                {busy ? (
+                  <button type="button" className="wick-send-stop" onClick={() => stop()} aria-label="Stop generating"><Square size={15} fill="currentColor" /></button>
+                ) : (
+                  <button type="submit" className="wick-send" disabled={!composer.trim() || remaining <= 0} aria-label="Send message"><ArrowUp size={17} /></button>
+                )}
+              </div>
+            </form>
+            <div className="wick-disclaimer">WickAI may make mistakes. Verify important information.</div>
+          </div>
+        </section>
+
+        {memoryOpen && (
+          <div className="wick-modal-layer" role="dialog" aria-modal="true" aria-label="WickAI memory">
+            <div className="wick-modal">
+              <div className="wick-modal-head"><div><h2>Memory</h2><p>Things WickAI should remember for this account.</p></div><button className="wick-icon-button" onClick={() => setMemoryOpen(false)}><X size={16} /></button></div>
+              <textarea className="wick-memory-editor" value={memoryDraft} onChange={(event) => setMemoryDraft(event.target.value)} maxLength={2400} placeholder="Contoh: Saya lebih suka jawaban singkat, saya sedang belajar Next.js..." />
+              <div className="wick-modal-foot"><span>{memoryDraft.length}/2400</span><button className="wick-modal-primary" onClick={persistMemory}>Save memory</button></div>
+            </div>
+          </div>
+        )}
+
+        {authMode && (
+          <div className="wick-modal-layer" role="dialog" aria-modal="true" aria-label="WickAI authentication">
+            <form className="wick-modal wick-auth-modal" onSubmit={submitAuth}>
+              <div className="wick-auth-brand"><img src="https://api.dicebear.com/9.x/shapes/png?seed=wickai-auth&backgroundColor=11111a" alt="WickAI" /></div>
+              <div className="wick-modal-head centered"><div><h2>{authMode === "login" ? "Welcome back" : "Create your WickAI account"}</h2><p>{authMode === "login" ? "Sign in to restore chats, memory, and usage." : "Your account stays local for now while we build the full backend auth layer."}</p></div><button type="button" className="wick-icon-button" onClick={() => setAuthMode(null)}><X size={16} /></button></div>
+              <label className="wick-field"><span>Username</span><input value={usernameInput} onChange={(event) => setUsernameInput(event.target.value)} autoComplete="username" /></label>
+              <label className="wick-field"><span>Password</span><input value={passwordInput} onChange={(event) => setPasswordInput(event.target.value)} type="password" autoComplete={authMode === "login" ? "current-password" : "new-password"} /></label>
+              {authError && <div className="wick-auth-error">{authError}</div>}
+              <button className="wick-modal-primary auth-submit" type="submit">{authMode === "login" ? "Sign in" : "Create account"}</button>
+              <button type="button" className="wick-modal-switch" onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setAuthError(""); }}>
+                {authMode === "login" ? "Need an account? Register" : "Already have an account? Sign in"}
+              </button>
+            </form>
+          </div>
+        )}
+
+        {mobileInfoOpen && (
+          <button className="wick-info-sheet" onClick={() => setMobileInfoOpen(false)} aria-label="Close info"><FileText size={16} /> WickAI workspace status</button>
+        )}
+      </main>
+    </AssistantRuntimeProvider>
   );
 }
