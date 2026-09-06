@@ -163,10 +163,6 @@ textarea { field-sizing: content; }
   .wick-pop::after { font-size: 13px; }
 }
 
-@media (hover: none) {
-  .group:hover .group-hover\\:opacity-100 { opacity: 1; }
-}
-
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important;
