@@ -11,8 +11,8 @@ const defaultModel = process.env.WICKAI_MODEL ?? "wick-fast";
 const requestSchema = z.object({
   messages: z.array(z.unknown()).min(1),
   model: z.string().trim().min(1).optional(),
-  memory: z.string().max(4000).optional(),
-  user: z.string().trim().min(1).max(80).optional(),
+  memory: z.string().max(2400).optional(),
+  username: z.string().trim().min(1).max(64).optional(),
 });
 
 const configuredModels = process.env.WICKAI_MODELS
@@ -46,7 +46,7 @@ export async function POST(req: Request) {
     }
 
     const context = [
-      payload.user ? `Current user: ${payload.user}` : "",
+      payload.username ? `Current user: ${payload.username}` : "",
       payload.memory?.trim() ? `User memory:\n${payload.memory.trim()}` : "",
     ].filter(Boolean).join("\n\n");
 
