@@ -14,9 +14,7 @@ const starterPrompts = [
 export function WickAIChat() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [model, setModel] = useState("WickAI Pro");
-  const { messages, input, handleInputChange, handleSubmit, status, stop, setInput } = useChat({
-    body: { model: process.env.NEXT_PUBLIC_WICKAI_MODEL ?? "" },
-  });
+  const { messages, input, handleInputChange, handleSubmit, status, stop, setInput } = useChat();
 
   const busy = status === "submitted" || status === "streaming";
 
