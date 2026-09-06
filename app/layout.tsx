@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./wick-overrides.css";
+import "./wick-v4.css";
 
 export const metadata: Metadata = {
   title: "WickAI — AI Workspace",
@@ -10,7 +11,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#07070a",
+  themeColor: "#0b0c0f",
   colorScheme: "dark",
   width: "device-width",
   initialScale: 1,
