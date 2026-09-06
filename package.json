@@ -14,8 +14,6 @@
   "dependencies": {
     "@ai-sdk/openai": "^4.0.60",
     "@ai-sdk/react": "^4.0.96",
-    "@assistant-ui/ai-sdk": "^0.0.2",
-    "@assistant-ui/react": "^0.15.18",
     "ai": "^7.0.93",
     "clsx": "^2.1.1",
     "lucide-react": "^1.41.0",
