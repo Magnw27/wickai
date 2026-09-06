@@ -10,7 +10,6 @@ import {
   ChevronDown,
   Copy,
   Database,
-  FileText,
   History,
   LogIn,
   LogOut,
@@ -80,6 +79,7 @@ export function WickAIChat() {
   const [copied, setCopied] = useState<string | null>(null);
   const [model, setModel] = useState("wick-fast");
   const [models, setModels] = useState(fallbackModels);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [chatId, setChatId] = useState(() => `chat_${Date.now()}`);
   const [history, setHistory] = useState<StoredChat[]>([]);
   const [account, setAccount] = useState<Account | null>(null);
@@ -93,18 +93,32 @@ export function WickAIChat() {
   const [showScroll, setShowScroll] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const threadListRef = useRef<HTMLElement>(null);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const autoScrollRaf = useRef<number | null>(null);
+  const shouldStickToBottom = useRef(true);
   const transport = useMemo(() => new DefaultChatTransport({ api: "/api/chat" }), []);
-  const chat = useChat({ transport });
+  const chat = useChat({ transport, experimental_throttle: 50 });
   const { messages, setMessages, sendMessage, status, stop, error, regenerate } = chat;
   const busy = status === "submitted" || status === "streaming";
   const usage = account ? Math.min(account.messageCount, LIMIT) : 0;
   const remaining = Math.max(LIMIT - usage, 0);
+  const selectedModel = models.find((item) => item.id === model) ?? { id: model, label: model };
   const filteredHistory = useMemo(() => {
     const q = search.trim().toLowerCase();
     return q ? history.filter((item) => item.title.toLowerCase().includes(q)) : history;
   }, [history, search]);
+
+  const scrollToBottom = (behavior: ScrollBehavior = "auto") => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    if (autoScrollRaf.current !== null) cancelAnimationFrame(autoScrollRaf.current);
+    autoScrollRaf.current = requestAnimationFrame(() => {
+      viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+      autoScrollRaf.current = null;
+    });
+  };
 
   useEffect(() => {
     try {
@@ -157,12 +171,32 @@ export function WickAIChat() {
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    const onScroll = () => setShowScroll(viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight > 300);
+    const onScroll = () => {
+      const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      const atBottom = distance <= 96;
+      shouldStickToBottom.current = atBottom;
+      setShowScroll(!atBottom && messages.length > 0);
+    };
+    onScroll();
     viewport.addEventListener("scroll", onScroll, { passive: true });
     return () => viewport.removeEventListener("scroll", onScroll);
-  }, []);
+  }, [messages.length]);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [messages, status]);
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const threadList = threadListRef.current;
+    if (!viewport || !threadList) return;
+    const onResize = () => {
+      if (shouldStickToBottom.current) scrollToBottom("auto");
+    };
+    const observer = new ResizeObserver(onResize);
+    observer.observe(threadList);
+    if (shouldStickToBottom.current) scrollToBottom("auto");
+    return () => {
+      observer.disconnect();
+      if (autoScrollRaf.current !== null) cancelAnimationFrame(autoScrollRaf.current);
+    };
+  }, [messages.length]);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 900px)");
@@ -176,8 +210,20 @@ export function WickAIChat() {
     return () => { document.body.style.overflow = ""; };
   }, [sidebarOpen]);
 
-  const startNewChat = () => { stop(); setChatId(`chat_${Date.now()}`); setMessages([]); setComposer(""); setPanel("none"); setSidebarOpen(false); textareaRef.current?.focus(); };
-  const openChat = (item: StoredChat) => { stop(); setChatId(item.id); setMessages(item.messages); setComposer(""); setSidebarOpen(false); };
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      if (modelMenuRef.current && !modelMenuRef.current.contains(event.target as Node)) setModelMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setModelMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => { document.removeEventListener("mousedown", onPointerDown); document.removeEventListener("keydown", onKeyDown); };
+  }, []);
+
+  const startNewChat = () => { stop(); setChatId(`chat_${Date.now()}`); setMessages([]); setComposer(""); setPanel("none"); setModelMenuOpen(false); setSidebarOpen(false); shouldStickToBottom.current = true; textareaRef.current?.focus(); };
+  const openChat = (item: StoredChat) => { stop(); setChatId(item.id); setMessages(item.messages); setComposer(""); setPanel("none"); setModelMenuOpen(false); setSidebarOpen(false); shouldStickToBottom.current = true; };
   const clearHistory = () => { if (!account) return; setHistory([]); localStorage.removeItem(chatKey(account.username)); startNewChat(); };
   const saveAccount = (next: Account) => {
     const raw = localStorage.getItem(ACCOUNTS_KEY);
@@ -186,7 +232,7 @@ export function WickAIChat() {
     localStorage.setItem(SESSION_KEY, next.username);
     setAccount(next); setMemoryDraft(next.memory); setAuthMode(null); setUsernameInput(""); setPasswordInput(""); setAuthError("");
   };
-  const logout = () => { stop(); localStorage.removeItem(SESSION_KEY); setAccount(null); setHistory([]); setMessages([]); setChatId(`chat_${Date.now()}`); setPanel("none"); };
+  const logout = () => { stop(); localStorage.removeItem(SESSION_KEY); setAccount(null); setHistory([]); setMessages([]); setChatId(`chat_${Date.now()}`); setPanel("none"); setModelMenuOpen(false); };
   const submitAuth = async (event: React.FormEvent) => {
     event.preventDefault();
     const username = usernameInput.trim().toLowerCase();
@@ -218,6 +264,7 @@ export function WickAIChat() {
     if (!text || busy) return;
     if (!account) { setAuthMode("login"); return; }
     if (remaining <= 0) return;
+    shouldStickToBottom.current = true;
     setComposer("");
     const next = { ...account, usageDay: todayKey(), messageCount: account.usageDay === todayKey() ? account.messageCount + 1 : 1 };
     saveAccount(next);
@@ -247,7 +294,7 @@ export function WickAIChat() {
 
       <section className="wk-stage">
         <header className="wk-header">
-          <div className="wk-header-left"><button className="wk-icon wk-mobile-only" onClick={() => setSidebarOpen(true)} aria-label="Open navigation"><Menu size={17} /></button><div className="wk-model"><span className="wk-model-dot" /><span><small>MODEL</small><b>{models.find((item) => item.id === model)?.label ?? model}</b></span><ChevronDown size={14} /><select value={model} onChange={(event) => setModel(event.target.value)} aria-label="Select model">{models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></div></div>
+          <div className="wk-header-left"><button className="wk-icon wk-mobile-only" onClick={() => setSidebarOpen(true)} aria-label="Open navigation"><Menu size={17} /></button><div className="wk-model-wrap" ref={modelMenuRef}><button className={`wk-model-trigger ${modelMenuOpen ? "is-open" : ""}`} onClick={() => setModelMenuOpen((open) => !open)} aria-haspopup="listbox" aria-expanded={modelMenuOpen}><span className="wk-model-dot" /><span><small>MODEL</small><b>{selectedModel.label}</b></span><ChevronDown size={14} /></button>{modelMenuOpen && <div className="wk-model-menu" role="listbox" aria-label="Select model">{models.map((item) => <button key={item.id} className={item.id === model ? "active" : ""} onClick={() => { setModel(item.id); setModelMenuOpen(false); }} role="option" aria-selected={item.id === model}><span><b>{item.label}</b><small>{item.id}</small></span>{item.id === model && <Check size={15} />}</button>)}</div>}</div></div>
           <div className="wk-header-actions"><button className="wk-header-link" onClick={() => setPanel("memory")}><Database size={15} />Memory</button><button className="wk-icon" onClick={startNewChat} aria-label="New conversation"><Plus size={17} /></button></div>
         </header>
 
@@ -258,15 +305,14 @@ export function WickAIChat() {
             <h1>What can we build today?</h1>
             <p>A clean workspace for thinking, coding, researching, and creating.</p>
             <div className="wk-prompts">{prompts.map((prompt, index) => <button key={prompt.title} style={{ animationDelay: `${index * 55}ms` }} onClick={() => submit(prompt.text)}><span><b>{prompt.title}</b><small>{prompt.text}</small></span><ArrowUp size={15} /></button>)}</div>
-          </section> : <section className="wk-thread-list">
+          </section> : <section ref={threadListRef} className="wk-thread-list">
             {messages.map((message, index) => {
               const text = textOf(message);
               const sections = sectionsOf(text);
               const assistant = message.role === "assistant";
-              return <article key={message.id} className={`wk-message ${assistant ? "assistant" : "user"}`}>
-                <div className={`wk-message-avatar ${assistant ? "ai" : "me"}`}>{assistant ? <Sparkles size={14} /> : (account?.username || "G").slice(0, 1).toUpperCase()}</div>
+              return <article key={message.id} className={`wk-message ${assistant ? "assistant" : "user"} ${assistant ? "" : "is-user"}`}>
+                <div className={`wk-message-avatar ${assistant ? "ai" : "me"}`} aria-hidden="true">{assistant ? <Sparkles size={14} /> : (account?.username || "G").slice(0, 1).toUpperCase()}</div>
                 <div className="wk-message-main">
-                  <div className="wk-message-head"><strong>{assistant ? "WickAI" : account?.username || "You"}</strong><span>{assistant ? "Assistant" : "You"}</span></div>
                   <div className="wk-message-content">{assistant ? sections.map((section, sectionIndex) => <div key={`${message.id}-${sectionIndex}`}><Markdown content={section} /></div>) : <div className="wk-user-text">{text}</div>}{assistant && index === messages.length - 1 && busy && <span className="wk-cursor" />}</div>
                   {assistant && <div className="wk-actions"><button onClick={() => copyMessage(message.id, text)}>{copied === message.id ? <Check size={13} /> : <Copy size={13} />}{copied === message.id ? "Copied" : "Copy"}</button>{index === messages.length - 1 && <button onClick={() => regenerate()}><ArrowUp size={13} />Regenerate</button>}</div>}
                 </div>
@@ -274,9 +320,8 @@ export function WickAIChat() {
             })}
             {busy && messages[messages.length - 1]?.role === "user" && <div className="wk-thinking"><span className="wk-thinking-dot" /><TextShimmer className="wk-shimmer" duration={2.4}>WickAI is thinking…</TextShimmer></div>}
             {error && <div className="wk-error">{error.message || "Something went wrong. Please try again."}</div>}
-            <div ref={bottomRef} />
           </section>}
-          {showScroll && <button className="wk-scroll" onClick={() => bottomRef.current?.scrollIntoView({ behavior: "smooth" })} aria-label="Scroll to bottom"><ArrowDown size={16} /></button>}
+          {showScroll && <button className="wk-scroll" onClick={() => { shouldStickToBottom.current = true; scrollToBottom("smooth"); }} aria-label="Scroll to bottom"><ArrowDown size={16} /></button>}
         </div>
 
         <div className={`wk-composer-wrap ${composerFocused ? "focused" : ""}`}>
