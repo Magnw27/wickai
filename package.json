@@ -4,12 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
     "typecheck": "tsc --noEmit"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=20.9.0 <23"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.60",
