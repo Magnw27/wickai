@@ -17,8 +17,8 @@ const fallbackModels: WickModel[] = [
   { id: "wick-chat", label: "Wick Chat" },
 ];
 const starterPrompts = [
-  "Explain a complex topic simply",
-  "Help me build a Next.js feature",
+  "Jelasin apa yang dimaksud ai?",
+  "who's create WickAI?",
   "Turn my rough idea into a plan",
   "Review this code for improvements",
 ];
