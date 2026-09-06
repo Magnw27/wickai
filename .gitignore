@@ -1,0 +1,16 @@
+.next/
+node_modules/
+out/
+build/
+.env
+.env.*
+!.env.example
+.vercel/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+*.tsbuildinfo
+next-env.d.ts
