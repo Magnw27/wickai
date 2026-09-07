@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./wick.css";
+import "./wick-motion.css";
 
 export const metadata: Metadata = {
   title: "WickAI — AI Workspace",
