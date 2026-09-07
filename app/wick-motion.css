@@ -1,0 +1,77 @@
+/* WickAI motion system — restrained, responsive, GPU-friendly. */
+
+.wk-shell{--wk-ease:cubic-bezier(.22,1,.36,1);--wk-spring:cubic-bezier(.16,1.25,.35,1)}
+
+/* Tactile controls: lift → press → settle. */
+.wk-shell button:not(:disabled){will-change:transform}
+.wk-shell button:not(:disabled) svg{transition:transform .22s var(--wk-ease)}
+.wk-shell button:not(:disabled):hover svg{transform:translateY(-1px)}
+.wk-shell button:not(:disabled):active svg{transform:scale(.92)}
+.wk-new:hover svg,.wk-send:hover svg{transform:translateX(1px) scale(1.04)}
+.wk-brand:hover .wk-brand-mark{transform:rotate(-5deg) scale(1.04);box-shadow:0 8px 20px #08090b}
+.wk-brand-mark{transition:transform .28s var(--wk-spring),box-shadow .22s var(--wk-ease)}
+
+/* Focus feels physical instead of flashy. */
+.wk-composer-wrap.focused .wk-composer{animation:wk-composer-focus .32s var(--wk-ease) both}
+.wk-composer textarea:focus{caret-color:#e5ebf2}
+@keyframes wk-composer-focus{0%{transform:scale(.997);box-shadow:0 18px 45px #07080a}55%{transform:scale(1.006);box-shadow:0 22px 55px #07080a}100%{transform:scale(1);box-shadow:0 20px 50px #07080a}}
+
+/* Home cards enter with a real stagger, not a wall of simultaneous motion. */
+.wk-prompts button:nth-child(1){animation-delay:.12s}
+.wk-prompts button:nth-child(2){animation-delay:.18s}
+.wk-prompts button:nth-child(3){animation-delay:.24s}
+.wk-prompts button:nth-child(4){animation-delay:.30s}
+.wk-prompts button:hover{transform:translateY(-3px) scale(1.008);box-shadow:0 12px 28px #08090b}
+.wk-prompts button:active{transform:translateY(-1px) scale(.985)!important}
+
+/* Conversation rhythm. */
+.wk-message{animation-name:wk-message-enter}
+@keyframes wk-message-enter{0%{opacity:0;transform:translateY(12px) scale(.992)}65%{opacity:1;transform:translateY(-1px) scale(1.001)}100%{opacity:1;transform:none}}
+.wk-message.is-user .wk-user-text{animation:wk-user-pop .28s var(--wk-spring) both}
+@keyframes wk-user-pop{0%{opacity:0;transform:translateY(6px) scale(.97)}100%{opacity:1;transform:none}}
+
+/* Streaming state: subtle, never distracting. */
+.wk-thinking-dot{box-shadow:0 0 0 0 #aab9c8;animation:wk-thinking-pulse 1.25s ease-in-out infinite}
+@keyframes wk-thinking-pulse{0%,100%{transform:scale(.7);box-shadow:0 0 0 0 #aab9c8}50%{transform:scale(1);box-shadow:0 0 0 5px #1a2027}}
+.wk-cursor{animation:wk-cursor-blink .72s steps(1) infinite}
+@keyframes wk-cursor-blink{0%,48%{opacity:1}49%,100%{opacity:0}}
+
+/* Model menu and account menu feel anchored to their trigger. */
+.wk-model-menu,.wk-menu{transform-origin:top center;animation:wk-menu-in .2s var(--wk-spring) both}
+@keyframes wk-menu-in{0%{opacity:0;transform:translateY(-5px) scale(.96)}70%{opacity:1;transform:translateY(1px) scale(1.008)}100%{opacity:1;transform:none}}
+.wk-model-menu button{transition:transform .16s var(--wk-ease),background-color .16s,color .16s}
+.wk-model-menu button:hover{transform:translateX(3px)}
+.wk-model-trigger.is-open>svg:last-child{transform:rotate(180deg)}
+
+/* Navigation selection glides into place. */
+.wk-thread{position:relative;overflow:hidden}
+.wk-thread::before{content:"";position:absolute;left:0;top:7px;bottom:7px;width:2px;border-radius:2px;background:#cdd8e4;transform:scaleY(0);transform-origin:center;transition:transform .2s var(--wk-ease)}
+.wk-thread.active::before{transform:scaleY(1)}
+.wk-thread:hover{transform:translateX(2px)}
+
+/* Scroll-to-bottom button has a tiny arrival pulse. */
+.wk-scroll{animation:wk-scroll-in .26s var(--wk-spring) both}
+@keyframes wk-scroll-in{0%{opacity:0;transform:translateY(8px) scale(.8)}70%{opacity:1;transform:translateY(-1px) scale(1.04)}100%{opacity:1;transform:none}}
+
+/* Modal enters as one composed surface. */
+.wk-modal-layer{animation:wk-layer-in .18s ease-out both}
+.wk-modal{animation:wk-modal-in .3s var(--wk-spring) both}
+@keyframes wk-layer-in{from{opacity:0}to{opacity:1}}
+@keyframes wk-modal-in{0%{opacity:0;transform:translateY(12px) scale(.965)}65%{opacity:1;transform:translateY(-2px) scale(1.004)}100%{opacity:1;transform:none}}
+
+/* Send button gets a restrained ready-state pulse. */
+.wk-send:not(:disabled){animation:wk-send-ready 2.8s ease-in-out infinite}
+.wk-send:not(:disabled):hover,.wk-send:not(:disabled):active{animation:none}
+@keyframes wk-send-ready{0%,72%,100%{box-shadow:0 0 0 0 #0b0d10}84%{box-shadow:0 0 0 4px #252b32}}
+
+/* Mobile drawer gets a slightly softer spring. */
+@media(max-width:900px){
+  .wk-rail{transition:transform .34s var(--wk-spring),width .24s var(--wk-ease)}
+  .wk-rail.is-open{box-shadow:24px 0 55px #050607}
+  .wk-model-menu{animation-duration:.22s}
+  .wk-message.is-user .wk-user-text{max-width:88%}
+}
+
+@media(prefers-reduced-motion:reduce){
+  .wk-shell *,.wk-shell *::before,.wk-shell *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}
