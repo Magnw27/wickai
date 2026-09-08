@@ -1,5 +1,6 @@
-import { WickAIChat } from "@/components/wickai-chat";
+import "./landing.css";
+import { WickAILanding } from "@/components/wickai-landing";
 
 export default function Home() {
-  return <WickAIChat />;
+  return <WickAILanding />;
 }
